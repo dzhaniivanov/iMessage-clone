@@ -1,14 +1,54 @@
 import { Prisma } from "@prisma/client";
 import { ApolloError } from "apollo-server-core";
-import { GraphQLContext } from "../../util/types";
+import { withFilter } from "graphql-subscriptions";
+import { ConversationPopulated, GraphQLContext } from "../../util/types";
 const resolvers = {
+  Query: {
+    conversations: async (
+      _: any,
+      __: any,
+      context: GraphQLContext
+    ): Promise<Array<ConversationPopulated>> => {
+      const { session, prisma } = context;
+
+      if (!session?.user) {
+        throw new ApolloError("Not authorized");
+      }
+
+      const {
+        user: { id: userId },
+      } = session;
+
+      try {
+        const conversations = await prisma.conversation.findMany({
+          // where: {
+          //   participants: {
+          //     some: {
+          //       userId: {
+          //         equals: userId,
+          //       },
+          //     },
+          //   },
+          // },
+          include: conversationPopulated,
+        });
+        return conversations.filter(
+          (conversation) =>
+            !!conversation.participants.find((p) => (p.userId = userId))
+        );
+      } catch (error: any) {
+        console.log("conversations error", error);
+        throw new ApolloError(error?.message);
+      }
+    },
+  },
   Mutation: {
     createConversation: async (
       _: any,
       args: { participantIds: Array<string> },
       context: GraphQLContext
     ): Promise<{ conversationId: string }> => {
-      const { session, prisma } = context;
+      const { session, prisma, pubsub } = context;
       const { participantIds } = args;
 
       console.log("IDS", participantIds);
@@ -36,6 +76,11 @@ const resolvers = {
           include: conversationPopulated,
         });
 
+        //emit a CONVERSATION_STARTED event using pubsub
+        pubsub.publish("CONVERSATION_CREATED", {
+          conversationCreated: conversation,
+        });
+
         return {
           conversationId: conversation.id,
         };
@@ -45,7 +90,36 @@ const resolvers = {
       }
     },
   },
+  Subscription: {
+    conversationCreated: {
+      subscribe: withFilter(
+        (_: any, __: any, context: GraphQLContext) => {
+          const { pubsub } = context;
+          return pubsub.asyncIterator(["CONVERSATION_CREATED"]);
+        },
+        (
+          payload: ConversationCreatedSubscriptionPayload,
+          _,
+          context: GraphQLContext
+        ) => {
+          const { session } = context;
+          const {
+            conversationCreated: { participants },
+          } = payload;
+
+          const userIsParticipant = !!participants.find(
+            (p) => p.userId === session?.user.id
+          );
+          return userIsParticipant;
+        }
+      ),
+    },
+  },
 };
+
+export interface ConversationCreatedSubscriptionPayload {
+  conversationCreated: ConversationPopulated;
+}
 
 export const participantPopulated =
   Prisma.validator<Prisma.ConversationParticipantInclude>()({

@@ -1,3 +1,5 @@
+import { ConversationPopulated } from "../../../api/src/util/types";
+
 // users
 
 export interface CreateUsernameData {
@@ -25,6 +27,9 @@ export interface SearchedUser {
 }
 
 //conversations
+export interface ConversationsData {
+  conversations: Array<ConversationPopulated>;
+}
 
 export interface CreateConversationData {
   createConversation: {
@@ -33,5 +38,5 @@ export interface CreateConversationData {
 }
 
 export interface CreateConversationInput {
-  participantIds:Array<string>
+  participantIds: Array<string>;
 }
